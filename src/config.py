@@ -31,6 +31,14 @@ train on the complete dataset.
 
 import os
 
+import torch
+
+
+# True on Colab and any other CUDA box. The batch sizes below differ a
+# lot between a real GPU and the 16 GB Mac, so detect it once here.
+
+CUDA = torch.cuda.is_available()
+
 
 MODEL_NAME = "Qwen/Qwen2.5-3B"
 
@@ -82,8 +90,12 @@ COMPLETION_ONLY_LOSS = True
 #
 # Set to None later to train on the complete dataset.
 
-MAX_TRAIN_SAMPLES = 100
-MAX_EVAL_SAMPLES = 10
+# Set MAX_TRAIN_SAMPLES back to 100 to re-run the smoke test. With only
+# ~13 optimizer steps, also drop EVAL_STEPS/SAVE_STEPS to 5 or neither
+# evaluation nor checkpointing will ever fire.
+
+MAX_TRAIN_SAMPLES = None
+MAX_EVAL_SAMPLES = 200
 
 
 # ============================================================
@@ -117,11 +129,27 @@ LORA_TARGET_MODULES = [
 
 NUM_TRAIN_EPOCHS = 1
 
-PER_DEVICE_TRAIN_BATCH_SIZE = 1
+# A GPU runs a real batch in roughly the time it takes to run one
+# example, so accumulating eight single-example passes wastes most of
+# the card. The Mac had no choice: batch 1 was all that fit in 16 GB.
+#
+# Both settings give the same effective batch of 8, so the learning rate
+# stays valid either way.
 
-PER_DEVICE_EVAL_BATCH_SIZE = 1
+if CUDA:
+    PER_DEVICE_TRAIN_BATCH_SIZE = 8
+    PER_DEVICE_EVAL_BATCH_SIZE = 8
+    GRADIENT_ACCUMULATION_STEPS = 1
+else:
+    PER_DEVICE_TRAIN_BATCH_SIZE = 1
+    PER_DEVICE_EVAL_BATCH_SIZE = 1
+    GRADIENT_ACCUMULATION_STEPS = 8
 
-GRADIENT_ACCUMULATION_STEPS = 8
+
+# Recomputing activations in the backward pass saves memory but costs
+# roughly 30% speed. Needed on the Mac, wasteful on a GPU with headroom.
+
+GRADIENT_CHECKPOINTING = not CUDA
 
 LEARNING_RATE = 2e-4
 
@@ -136,13 +164,15 @@ WARMUP_RATIO = 0.03
 
 LOGGING_STEPS = 10
 
-# The smoke test runs only ~13 optimizer steps, so these must stay small
-# or evaluation and checkpointing never trigger. Raise both to 50-100
-# when MAX_TRAIN_SAMPLES is set back to None.
+# The full run is ~1687 optimizer steps (13,496 examples / effective
+# batch 8) on any device -- only the time per step changes. Every 100
+# steps gives ~17 evaluations and ~17 checkpoints across the run.
+#
+# Drop both to 5 for the smoke test, which is only ~13 steps.
 
-EVAL_STEPS = 5
+EVAL_STEPS = 100
 
-SAVE_STEPS = 5
+SAVE_STEPS = 100
 
 SAVE_TOTAL_LIMIT = 2
 

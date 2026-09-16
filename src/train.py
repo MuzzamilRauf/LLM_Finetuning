@@ -348,7 +348,7 @@ def main():
 
         packing=False,
 
-        gradient_checkpointing=True,
+        gradient_checkpointing=config.GRADIENT_CHECKPOINTING,
 
         # Let the Trainer drive autocast on CUDA. fp16 also switches on
         # the gradient scaler, without which fp16 gradients underflow.
