@@ -29,11 +29,23 @@ that LoRA + SFT works correctly, we can remove the sample limit and
 train on the complete dataset.
 """
 
+import os
+
+
 MODEL_NAME = "Qwen/Qwen2.5-3B"
 
 DATASET_PATH = "data/processed/dolly-prepared"
 
-OUTPUT_DIR = "outputs/qwen2.5-3b-dolly-lora"
+# Override with the OUTPUT_DIR environment variable. On Colab point this
+# at Google Drive -- /content is wiped when the session ends, which would
+# destroy the checkpoints that resuming depends on.
+#
+#     os.environ["OUTPUT_DIR"] = "/content/drive/MyDrive/qwen-dolly-lora"
+
+OUTPUT_DIR = os.environ.get(
+    "OUTPUT_DIR",
+    "outputs/qwen2.5-3b-dolly-lora",
+)
 
 
 # ============================================================
@@ -133,3 +145,15 @@ EVAL_STEPS = 5
 SAVE_STEPS = 5
 
 SAVE_TOTAL_LIMIT = 2
+
+
+# ============================================================
+# Resuming
+# ============================================================
+
+# Colab sessions end without warning. When this is True, training picks
+# up from the newest checkpoint in OUTPUT_DIR instead of starting over.
+# Starting fresh is handled automatically when no checkpoint exists, so
+# this is safe to leave on for the first run.
+
+RESUME_FROM_CHECKPOINT = True

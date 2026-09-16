@@ -38,11 +38,14 @@ After the smoke test succeeds, change:
 in config.py to train on the complete dataset.
 """
 
+import os
+
 import torch
 
 from datasets import load_from_disk
 from peft import LoraConfig, TaskType
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.trainer_utils import get_last_checkpoint
 from trl import SFTConfig, SFTTrainer
 
 import config
@@ -51,15 +54,44 @@ import config
 def get_device():
     """
     Select the best available device.
-    """
 
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
+    CUDA is checked first: when both are somehow present, a real GPU
+    always beats Apple Silicon for this workload.
+    """
 
     if torch.cuda.is_available():
         return torch.device("cuda")
 
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+
     return torch.device("cpu")
+
+
+def get_dtype(device):
+    """
+    Pick the training precision for this device.
+
+    bfloat16 has the same range as float32, so it cannot overflow to inf
+    the way float16 does. It needs Ampere or newer, which rules out the
+    T4 that free Colab usually hands out.
+
+        CUDA, Ampere+ (L4/A100)  -> bfloat16
+        CUDA, older (T4)         -> float16, with the gradient scaler
+        MPS                      -> float16
+        CPU                      -> float32
+    """
+
+    if device.type == "cuda":
+        if torch.cuda.is_bf16_supported():
+            return torch.bfloat16
+
+        return torch.float16
+
+    if device.type == "mps":
+        return torch.float16
+
+    return torch.float32
 
 
 def prepare_dataset(dataset):
@@ -111,19 +143,20 @@ def create_lora_config():
     )
 
 
-def load_model(device):
+def load_model(device, dtype):
     """
-    Load Qwen2.5-3B.
+    Load Qwen2.5-3B in the precision chosen for this device.
 
-    float16 is used on Apple Silicon to significantly reduce memory
-    usage compared with float32.
+    Half precision roughly halves the memory the weights occupy compared
+    with float32, which is what makes a 3B model trainable here at all.
     """
 
     print("\n=== LOADING MODEL ===")
+    print(f"Precision: {dtype}")
 
     model = AutoModelForCausalLM.from_pretrained(
         config.MODEL_NAME,
-        dtype=torch.float16,
+        dtype=dtype,
     )
 
     model.to(device)
@@ -134,6 +167,23 @@ def load_model(device):
     print("Model loaded successfully.")
 
     return model
+
+
+def find_checkpoint(output_dir):
+    """
+    Return the newest checkpoint in output_dir, or None if there is none.
+
+    Passing resume_from_checkpoint=True to a directory holding no
+    checkpoint raises, so the first run has to be told to start fresh.
+    """
+
+    if not config.RESUME_FROM_CHECKPOINT:
+        return None
+
+    if not os.path.isdir(output_dir):
+        return None
+
+    return get_last_checkpoint(output_dir)
 
 
 def print_device_info(device):
@@ -158,6 +208,7 @@ def main():
     print("=== QWEN2.5-3B LoRA + SFT TRAINING ===")
 
     device = get_device()
+    dtype = get_dtype(device)
     print_device_info(device)
 
     # --------------------------------------------------------
@@ -179,6 +230,8 @@ def main():
     # --------------------------------------------------------
     # Load dataset
     # --------------------------------------------------------
+
+    print(f"Output directory: {config.OUTPUT_DIR}")
 
     print("\n=== LOADING DATASET ===")
 
@@ -232,7 +285,7 @@ def main():
     # Load model
     # --------------------------------------------------------
 
-    model = load_model(device)
+    model = load_model(device, dtype)
 
     # --------------------------------------------------------
     # LoRA configuration
@@ -297,6 +350,12 @@ def main():
 
         gradient_checkpointing=True,
 
+        # Let the Trainer drive autocast on CUDA. fp16 also switches on
+        # the gradient scaler, without which fp16 gradients underflow.
+        bf16=(device.type == "cuda" and dtype == torch.bfloat16),
+
+        fp16=(device.type == "cuda" and dtype == torch.float16),
+
         report_to="none",
 
         use_cpu=False,
@@ -334,9 +393,14 @@ def main():
     # Start training
     # --------------------------------------------------------
 
-    print("\n=== STARTING TRAINING ===")
+    checkpoint = find_checkpoint(config.OUTPUT_DIR)
 
-    trainer.train()
+    if checkpoint:
+        print(f"\n=== RESUMING FROM {checkpoint} ===")
+    else:
+        print("\n=== STARTING TRAINING ===")
+
+    trainer.train(resume_from_checkpoint=checkpoint)
 
     # --------------------------------------------------------
     # Save adapter

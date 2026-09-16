@@ -1,9 +1,17 @@
+# Do NOT install torch from this file on Colab. Colab ships a torch build
+# matched to its CUDA driver, and reinstalling it usually breaks the GPU.
+# Install torch separately (or not at all) and use:
+#
+#     pip install -r requirements.txt
+#
+# torch is listed without a pin so an existing install satisfies it.
+
 torch
-transformers
-datasets
-trl
-peft
-accelerate
-huggingface_hub
+transformers>=5.0,<6
+datasets>=4.0,<6
+trl>=1.0,<2
+peft>=0.17,<1
+accelerate>=1.0,<2
+huggingface_hub>=0.30
 safetensors
 sentencepiece
