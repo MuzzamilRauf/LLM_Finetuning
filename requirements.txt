@@ -5,6 +5,12 @@
 #     pip install -r requirements.txt
 #
 # torch is listed without a pin so an existing install satisfies it.
+#
+# Colab also preinstalls torchao 0.10.0, which peft>=0.17 rejects (it
+# wants >0.16.0) and raises on while building the LoRA layers. We don't
+# use torchao, and peft skips it silently when absent, so remove it:
+#
+#     pip uninstall -y torchao
 
 torch
 transformers>=5.0,<6
