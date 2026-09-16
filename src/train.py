@@ -5,7 +5,7 @@ This script connects all of the components we have prepared so far:
 
     Prepared Dolly dataset
             ↓
-        Training text
+    Qwen chat template
             ↓
        Qwen tokenizer
             ↓
@@ -21,6 +21,10 @@ Important:
     The original Qwen2.5-3B weights are frozen.
 
     Only the LoRA adapter parameters are trained.
+
+    The loss is computed on the assistant's reply only. Each example is
+    fed as a prompt/completion pair, so TRL masks the prompt tokens and
+    trains on the completion.
 
 The first run uses a small dataset subset as a smoke test. This allows
 us to verify that the training pipeline works correctly on the 16 GB
@@ -58,49 +62,36 @@ def get_device():
     return torch.device("cpu")
 
 
-def build_training_text(example):
-    """
-    Convert the structured messages into the explicit training tex
-    format that we will use for the Qwen2.5-3B base model.
-
-    Dataset.map() expects this function to return a dictionary,
-    so the formatted conversation is returned under the "text" field.
-    """
-
-    messages = example["messages"]
-
-    user_content = messages[0]["content"]
-    assistant_content = messages[1]["content"]
-
-    training_text = (
-        "<|im_start|>user\n"
-        f"{user_content}"
-        "<|im_end|>\n"
-        "<|im_start|>assistant\n"
-        f"{assistant_content}"
-        "<|im_end|>"
-    )
-
-    return {
-        "text": training_text
-    }
-
-
 def prepare_dataset(dataset):
     """
-    Convert the messages column into a text column.
-
-    SFTTrainer will tokenize this text using the Qwen tokenizer.
+    Convert the messages column into prompt/completion columns.
     """
 
-    dataset = dataset.map(
-        build_training_text,
-        desc="Building training text",
+    return dataset.map(
+        to_prompt_completion,
+        remove_columns=["messages"],
+        desc="Building prompt/completion pairs",
     )
 
-    dataset = dataset.remove_columns(["messages"])
 
-    return dataset
+def to_prompt_completion(example):
+    """
+    Split one conversation into a prompt/completion pair.
+
+    TRL applies Qwen's official chat template to each side, then masks
+    the prompt so the loss is computed on the assistant's reply only.
+
+    The prompt ends with the assistant header ("<|im_start|>assistant\n")
+    and the completion carries the reply plus "<|im_end|>", so the model
+    is still trained to emit its stop token.
+    """
+
+    user_message, assistant_message = example["messages"]
+
+    return {
+        "prompt": [user_message],
+        "completion": [assistant_message],
+    }
 
 
 def create_lora_config():
@@ -199,6 +190,12 @@ def main():
     # Prepare text
     # --------------------------------------------------------
 
+    # The dataset holds a "messages" column in conversational format.
+    # We split it into prompt/completion so TRL can mask the prompt, and
+    # let TRL apply Qwen's official chat template to each side. The
+    # ChatML string is no longer built by hand, so the training format is
+    # guaranteed to match what the model sees at inference time.
+
     print("\n=== PREPARING DATASET ===")
 
     train_dataset = prepare_dataset(dataset["train"])
@@ -293,7 +290,8 @@ def main():
 
         max_length=config.MAX_LENGTH,
 
-        dataset_text_field="text",
+        # Grade the model only on the assistant's reply, not the prompt.
+        completion_only_loss=config.COMPLETION_ONLY_LOSS,
 
         packing=False,
 
