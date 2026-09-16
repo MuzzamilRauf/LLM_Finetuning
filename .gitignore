@@ -1,0 +1,29 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Generated datasets (regenerate with clean_data.py + prepare_data.py, seed=42)
+data/processed/
+data/raw/
+
+# Training artifacts (keep these in Drive / cloud storage, not git)
+outputs/
+*.safetensors
+*.bin
+checkpoint-*/
+wandb/
+runs/
+
+# Secrets
+.env
+*.token
+
+# macOS
+.DS_Store

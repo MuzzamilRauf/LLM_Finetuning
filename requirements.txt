@@ -1,0 +1,9 @@
+torch
+transformers
+datasets
+trl
+peft
+accelerate
+huggingface_hub
+safetensors
+sentencepiece
