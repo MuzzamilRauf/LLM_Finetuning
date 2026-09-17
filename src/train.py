@@ -40,6 +40,13 @@ in config.py to train on the complete dataset.
 
 import os
 
+# Must be set before torch initialises CUDA. Lets the allocator grow a
+# segment instead of failing when free memory is fragmented.
+os.environ.setdefault(
+    "PYTORCH_CUDA_ALLOC_CONF",
+    "expandable_segments:True",
+)
+
 import torch
 
 from datasets import load_from_disk
@@ -77,13 +84,16 @@ def get_dtype(device):
     T4 that free Colab usually hands out.
 
         CUDA, Ampere+ (L4/A100)  -> bfloat16
-        CUDA, older (T4)         -> float16, with the gradient scaler
+        CUDA, Turing (T4)        -> float16, with the gradient scaler
         MPS                      -> float16
         CPU                      -> float32
     """
 
     if device.type == "cuda":
-        if torch.cuda.is_bf16_supported():
+        # including_emulation defaults to True, which reports success on
+        # a T4 by emulating bf16 in software -- slower than native fp16.
+        # Passing False restricts this to Ampere and newer.
+        if torch.cuda.is_bf16_supported(including_emulation=False):
             return torch.bfloat16
 
         return torch.float16

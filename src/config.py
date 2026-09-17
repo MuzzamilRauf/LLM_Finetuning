@@ -133,23 +133,29 @@ NUM_TRAIN_EPOCHS = 1
 # example, so accumulating eight single-example passes wastes most of
 # the card. The Mac had no choice: batch 1 was all that fit in 16 GB.
 #
-# Both settings give the same effective batch of 8, so the learning rate
+# Batch 4 is sized for the 15 GB T4 that free Colab usually gives out.
+# Batch 8 without gradient checkpointing runs it out of memory partway
+# through the first step. On a 40 GB A100 batch 16 is comfortable.
+#
+# Every branch gives the same effective batch of 8, so the learning rate
 # stays valid either way.
 
 if CUDA:
-    PER_DEVICE_TRAIN_BATCH_SIZE = 8
-    PER_DEVICE_EVAL_BATCH_SIZE = 8
-    GRADIENT_ACCUMULATION_STEPS = 1
+    PER_DEVICE_TRAIN_BATCH_SIZE = 4
+    PER_DEVICE_EVAL_BATCH_SIZE = 4
+    GRADIENT_ACCUMULATION_STEPS = 2
 else:
     PER_DEVICE_TRAIN_BATCH_SIZE = 1
     PER_DEVICE_EVAL_BATCH_SIZE = 1
     GRADIENT_ACCUMULATION_STEPS = 8
 
 
-# Recomputing activations in the backward pass saves memory but costs
-# roughly 30% speed. Needed on the Mac, wasteful on a GPU with headroom.
+# Recomputing activations in the backward pass costs roughly 30% speed
+# and saves a large amount of memory. A 3B model at max_length=1024
+# does not fit a 15 GB T4 without it, so it stays on everywhere. Turn it
+# off only on a card with plenty of headroom (A100 and up).
 
-GRADIENT_CHECKPOINTING = not CUDA
+GRADIENT_CHECKPOINTING = True
 
 LEARNING_RATE = 2e-4
 
